@@ -584,12 +584,7 @@
         // ── Fetch with CORS proxy ──
         async function fetchWithProxy(url, signal, timeout) {
             const TO = timeout || 15000;
-            // Try direct fetch first (some APIs support CORS)
-            const methods = [
-                u => u,
-                ...CORS_PROXIES
-            ];
-            for (const pf of methods) {
+            for (const pf of CORS_PROXIES) {
                 const ctrl = new AbortController();
                 const timer = setTimeout(() => ctrl.abort(), TO);
                 try {
