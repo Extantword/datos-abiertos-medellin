@@ -1,0 +1,1327 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Datos Abiertos de Medellín</title>
+    <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f5f7fa; color: #202124; line-height: 1.5;
+            min-height: 100vh; display: flex; flex-direction: column;
+        }
+
+        header {
+            background: #ffffff; border-bottom: 1px solid #e0e0e0;
+            padding: 1.25rem 1.5rem; text-align: center;
+        }
+        header h1 { font-size: 1.5rem; font-weight: 700; color: #1a73e8; }
+        header p { color: #5f6368; font-size: 0.9rem; margin-top: 0.25rem; }
+        #dataset-count { font-weight: 600; color: #202124; }
+
+        /* Status bar */
+        .status-bar {
+            background: #fff; border-bottom: 1px solid #e0e0e0;
+            padding: 0; overflow: hidden; max-height: 0;
+            transition: max-height 0.3s, padding 0.3s;
+        }
+        .status-bar.visible { max-height: 160px; padding: 0.5rem 1.5rem; }
+        .status-content {
+            display: flex; align-items: center; gap: 0.75rem;
+            font-size: 0.8rem; color: #5f6368;
+        }
+        .status-content + .status-content { margin-top: 0.35rem; }
+        .progress-bar { flex: 1; height: 4px; background: #e0e0e0; border-radius: 2px; overflow: hidden; }
+        .progress-fill {
+            height: 100%; background: #1a73e8; border-radius: 2px;
+            transition: width 0.3s; width: 0%;
+        }
+        .progress-fill.green { background: #34a853; }
+        .progress-fill.indeterminate {
+            width: 30%; animation: indeterminate 1.5s ease-in-out infinite;
+        }
+        @keyframes indeterminate {
+            0% { transform: translateX(-100%); }
+            100% { transform: translateX(400%); }
+        }
+        .status-text { white-space: nowrap; min-width: fit-content; }
+        .status-bar .badge {
+            font-size: 0.7rem; padding: 0.1rem 0.4rem; border-radius: 8px;
+            background: #e8f5e9; color: #2e7d32; font-weight: 600; white-space: nowrap;
+        }
+        .status-bar .badge.stale { background: #fff3e0; color: #e65100; }
+
+        .toolbar {
+            background: #ffffff; border-bottom: 1px solid #e0e0e0;
+            padding: 0.75rem 1.5rem; position: sticky; top: 0; z-index: 10;
+            display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: center;
+        }
+        .toolbar input[type="text"] {
+            flex: 1; min-width: 200px; padding: 0.5rem 0.75rem;
+            border: 1px solid #e0e0e0; border-radius: 6px;
+            font-size: 0.9rem; outline: none; transition: border-color 0.2s;
+        }
+        .toolbar input[type="text"]:focus { border-color: #1a73e8; }
+        .toolbar select {
+            padding: 0.5rem 0.75rem; border: 1px solid #e0e0e0;
+            border-radius: 6px; font-size: 0.9rem; background: #fff;
+            outline: none; cursor: pointer; max-width: 240px;
+        }
+        .toolbar select:focus { border-color: #1a73e8; }
+        .btn-clear {
+            padding: 0.5rem 1rem; border: 1px solid #e0e0e0; border-radius: 6px;
+            background: #fff; font-size: 0.85rem; cursor: pointer;
+            color: #5f6368; display: none;
+        }
+        .btn-clear:hover { background: #f5f7fa; }
+        .btn-clear.visible { display: inline-block; }
+        .filter-info { width: 100%; font-size: 0.8rem; color: #5f6368; min-height: 1.2em; }
+
+        .loading-container { text-align: center; padding: 3rem 1rem; }
+        .spinner {
+            width: 36px; height: 36px;
+            border: 3px solid #e0e0e0; border-top-color: #1a73e8;
+            border-radius: 50%; animation: spin 0.6s linear infinite;
+            margin: 0 auto 0.75rem;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+        .progress-text { color: #5f6368; font-size: 0.9rem; }
+
+        .error-container { text-align: center; padding: 3rem 1rem; color: #d93025; }
+        .error-container a { color: #1a73e8; }
+
+        main { flex: 1; padding: 1rem 1.5rem; }
+
+        .grid {
+            display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 0.75rem;
+        }
+        .card {
+            background: #ffffff; border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+            padding: 0.75rem 1rem; cursor: pointer;
+            transition: box-shadow 0.2s, transform 0.15s;
+            animation: fadeIn 0.2s ease-out;
+        }
+        .card:hover { box-shadow: 0 3px 8px rgba(0,0,0,0.13); transform: translateY(-1px); }
+        .card-title {
+            font-size: 0.95rem; font-weight: 600; color: #202124;
+            display: flex; align-items: center; gap: 0.5rem;
+        }
+        .card-title .arrow {
+            font-size: 0.7rem; color: #80868b; transition: transform 0.2s; flex-shrink: 0;
+        }
+        .card.open .card-title .arrow { transform: rotate(90deg); }
+        .card-header-row {
+            display: flex; align-items: center; justify-content: space-between;
+            gap: 0.5rem; margin-top: 0.35rem; flex-wrap: wrap;
+        }
+        .card-header-row .card-tags { flex: 1; display: flex; flex-wrap: wrap; gap: 0.25rem; }
+        .card-header-row .preview-btn { flex-shrink: 0; }
+        .theme-badge {
+            font-size: 0.65rem; padding: 0.1rem 0.4rem;
+            border-radius: 10px; font-weight: 500;
+        }
+        .portal-badge {
+            font-size: 0.6rem; padding: 0.1rem 0.45rem;
+            border-radius: 10px; font-weight: 700; letter-spacing: 0.02em;
+            border: 1px solid rgba(0,0,0,0.08);
+        }
+        .card-details {
+            display: none; margin-top: 0.75rem;
+            padding-top: 0.75rem; border-top: 1px solid #f0f0f0;
+        }
+        .card.open .card-details { display: block; }
+        .card-description { font-size: 0.85rem; color: #5f6368; margin-bottom: 0.5rem; }
+        .card-meta { font-size: 0.75rem; color: #80868b; margin-bottom: 0.5rem; }
+        .distributions { display: flex; flex-wrap: wrap; gap: 0.35rem; align-items: center; }
+        .dist-btn {
+            font-size: 0.7rem; padding: 0.2rem 0.6rem; border-radius: 4px;
+            background: #e8f5e9; color: #2e7d32; text-decoration: none;
+            font-weight: 600; transition: background 0.2s;
+        }
+        .dist-btn:hover { background: #c8e6c9; }
+
+        /* Preview button */
+        .preview-btn {
+            font-size: 0.7rem; padding: 0.2rem 0.6rem; border-radius: 4px;
+            background: #e3f2fd; color: #1565c0; border: none;
+            font-weight: 600; cursor: pointer; transition: background 0.2s;
+            position: relative;
+        }
+        .preview-btn:hover { background: #bbdefb; }
+
+        /* Preview tooltip */
+        .preview-tooltip {
+            display: none; position: fixed; z-index: 1000;
+            background: #fff; border: 1px solid #e0e0e0; border-radius: 8px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.15); padding: 0.75rem;
+            max-width: 90vw; max-height: 60vh; overflow: auto;
+            animation: fadeIn 0.15s ease-out;
+        }
+        .preview-tooltip.visible { display: block; }
+        .preview-tooltip h4 {
+            font-size: 0.8rem; color: #1a73e8; margin-bottom: 0.5rem;
+            display: flex; align-items: center; gap: 0.5rem;
+        }
+        .preview-tooltip .mini-spinner {
+            width: 14px; height: 14px;
+            border: 2px solid #e0e0e0; border-top-color: #1a73e8;
+            border-radius: 50%; animation: spin 0.6s linear infinite;
+            display: inline-block;
+        }
+        .preview-tooltip table { border-collapse: collapse; font-size: 0.7rem; width: 100%; }
+        .preview-tooltip th {
+            background: #f5f7fa; padding: 0.3rem 0.5rem;
+            text-align: left; font-weight: 600; color: #202124;
+            border-bottom: 2px solid #e0e0e0; white-space: nowrap;
+        }
+        .preview-tooltip td {
+            padding: 0.25rem 0.5rem; border-bottom: 1px solid #f0f0f0;
+            max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+            color: #5f6368;
+        }
+        .preview-tooltip tr:hover td { background: #f8f9fa; }
+        .preview-tooltip .preview-footer {
+            margin-top: 0.5rem; font-size: 0.7rem; color: #80868b; text-align: center;
+        }
+        .preview-tooltip .preview-error { font-size: 0.75rem; color: #d93025; padding: 0.5rem 0; }
+
+        /* Detail page */
+        #detail-view { display: none; flex-direction: column; min-height: 100vh; }
+        #detail-view.active { display: flex; }
+        #catalog-view.hidden { display: none; }
+
+        .detail-header {
+            background: #fff; border-bottom: 1px solid #e0e0e0;
+            padding: 1rem 1.5rem; display: flex; align-items: center; gap: 1rem;
+        }
+        .back-btn {
+            padding: 0.4rem 0.8rem; border: 1px solid #e0e0e0; border-radius: 6px;
+            background: #fff; cursor: pointer; font-size: 0.85rem; color: #1a73e8;
+        }
+        .back-btn:hover { background: #f0f6ff; }
+        .detail-title { font-size: 1.2rem; font-weight: 700; color: #202124; }
+        .detail-body { flex: 1; padding: 1.5rem; max-width: 1000px; margin: 0 auto; width: 100%; }
+
+        .detail-section {
+            background: #fff; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+            padding: 1.25rem; margin-bottom: 1rem;
+        }
+        .detail-section h3 {
+            font-size: 0.9rem; font-weight: 600; color: #1a73e8;
+            margin-bottom: 0.75rem; padding-bottom: 0.5rem; border-bottom: 1px solid #f0f0f0;
+        }
+        .detail-section p { font-size: 0.85rem; color: #5f6368; }
+        .detail-section .meta-grid {
+            display: grid; grid-template-columns: auto 1fr; gap: 0.3rem 1rem; font-size: 0.85rem;
+        }
+        .meta-grid dt { color: #80868b; font-weight: 500; }
+        .meta-grid dd { color: #202124; }
+        .detail-section .dist-list { list-style: none; }
+        .detail-section .dist-list li {
+            display: flex; align-items: center; gap: 0.5rem;
+            padding: 0.4rem 0; border-bottom: 1px solid #f8f8f8;
+        }
+        .detail-section .dist-list li:last-child { border-bottom: none; }
+
+        .detail-table-container { overflow-x: auto; margin-top: 0.5rem; }
+        .detail-table { border-collapse: collapse; font-size: 0.8rem; width: 100%; }
+        .detail-table th {
+            background: #f5f7fa; padding: 0.4rem 0.6rem; text-align: left;
+            font-weight: 600; color: #202124; border-bottom: 2px solid #e0e0e0;
+            white-space: nowrap; position: sticky; top: 0;
+        }
+        .detail-table td {
+            padding: 0.35rem 0.6rem; border-bottom: 1px solid #f0f0f0;
+            max-width: 250px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        }
+        .detail-table tr:hover td { background: #f8f9fa; }
+        .detail-loading { text-align: center; padding: 2rem; color: #5f6368; }
+
+        .no-results { text-align: center; padding: 2rem; color: #5f6368; }
+
+        footer {
+            text-align: center; padding: 1rem; font-size: 0.8rem;
+            color: #80868b; border-top: 1px solid #e0e0e0; background: #ffffff;
+        }
+        footer a { color: #1a73e8; text-decoration: none; }
+        footer a:hover { text-decoration: underline; }
+
+        .grid-loading { opacity: 0.4; pointer-events: none; }
+
+        @media (max-width: 640px) {
+            .grid { grid-template-columns: 1fr; }
+            header h1 { font-size: 1.2rem; }
+            .toolbar { padding: 0.5rem 1rem; }
+            main { padding: 0.75rem; }
+            .detail-header { flex-wrap: wrap; }
+            .detail-title { font-size: 1rem; }
+        }
+    </style>
+</head>
+<body>
+    <!-- Catalog view -->
+    <div id="catalog-view">
+        <header>
+            <h1>Datos Abiertos de Medell&iacute;n</h1>
+            <p><span id="dataset-count">...</span> conjuntos de datos &middot; <span id="portal-count">5</span> portales</p>
+        </header>
+
+        <div class="status-bar" id="status-bar">
+            <div class="status-content">
+                <span class="status-text" id="status-text"></span>
+                <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
+                <span class="badge" id="status-badge" style="display:none;"></span>
+            </div>
+            <div class="status-content" id="preview-status" style="display:none;">
+                <span class="status-text" id="preview-status-text"></span>
+                <div class="progress-bar"><div class="progress-fill green" id="preview-progress-fill"></div></div>
+                <span class="badge" id="preview-status-badge" style="display:none;"></span>
+            </div>
+        </div>
+
+        <div class="toolbar">
+            <input type="text" id="search-input" placeholder="Buscar conjuntos de datos...">
+            <select id="theme-filter">
+                <option value="">Todas las categor&iacute;as</option>
+            </select>
+            <select id="portal-filter">
+                <option value="">Todos los portales</option>
+            </select>
+            <button class="btn-clear" id="btn-clear">Limpiar filtros</button>
+            <div class="filter-info" id="filter-info"></div>
+        </div>
+
+        <main>
+            <div id="loading" class="loading-container" style="display:none;">
+                <div class="spinner"></div>
+                <p class="progress-text" id="loading-text">Conectando con portales...</p>
+            </div>
+            <div id="error" class="error-container" style="display:none;"></div>
+            <div class="grid" id="grid"></div>
+            <div id="no-results" class="no-results" style="display:none;">No se encontraron conjuntos de datos.</div>
+        </main>
+
+        <footer>
+            Datos de <a href="https://www.medata.gov.co" target="_blank" rel="noopener">Medata</a>,
+            <a href="https://datosabiertos.metropol.gov.co" target="_blank" rel="noopener">Metropol</a>,
+            <a href="https://datosabiertos-metrodemedellin.opendata.arcgis.com" target="_blank" rel="noopener">Metro</a>,
+            <a href="https://geomedellin-m-medellin.opendata.arcgis.com" target="_blank" rel="noopener">GeoMedell&iacute;n</a> &amp;
+            <a href="https://www.datos.gov.co" target="_blank" rel="noopener">datos.gov.co</a>
+        </footer>
+    </div>
+
+    <!-- Detail view -->
+    <div id="detail-view">
+        <div class="detail-header">
+            <button class="back-btn" onclick="closeDetail()">&#8592; Volver</button>
+            <div class="detail-title" id="detail-title"></div>
+        </div>
+        <div class="detail-body" id="detail-body"></div>
+        <footer>
+            Datos Abiertos de Medell&iacute;n &mdash; Portal unificado
+        </footer>
+    </div>
+
+    <!-- Preview tooltip -->
+    <div class="preview-tooltip" id="preview-tooltip"></div>
+
+    <script>
+        // ── Config ──
+        const CORS_PROXIES = [
+            url => `https://corsproxy.io/?url=${encodeURIComponent(url)}`,
+            url => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`
+        ];
+        const CSV_PROXY = url => `https://api.codetabs.com/v1/proxy?quest=${url}`;
+        const PAGE_SIZE = 25;
+        const SOCRATA_PAGE_SIZE = 100;
+        const CACHE_MAX_AGE = 30 * 60 * 1000;
+
+        const PORTALS = [
+            { id: 'medata',      name: 'Medata',        color: '#1565c0', bg: '#dbeafe', type: 'dkan',    base: 'https://www.medata.gov.co' },
+            { id: 'metropol',    name: 'Metropol',      color: '#6a1b9a', bg: '#f3e5f5', type: 'dkan',    base: 'https://datosabiertos.metropol.gov.co' },
+            { id: 'metro',       name: 'Metro',         color: '#b45309', bg: '#fef3c7', type: 'dcat',    base: 'https://datosabiertos-metrodemedellin.opendata.arcgis.com' },
+            { id: 'geomedellin', name: 'GeoMedellín',   color: '#166534', bg: '#dcfce7', type: 'arcgis_v3', base: 'https://geomedellin-m-medellin.opendata.arcgis.com', orgFilter: 'Municipio%20de%20Medell%C3%ADn' },
+            { id: 'datos_gov',   name: 'Colombia',      color: '#991b1b', bg: '#fee2e2', type: 'socrata', base: 'https://www.datos.gov.co' },
+        ];
+        const PORTAL_MAP = Object.fromEntries(PORTALS.map(p => [p.id, p]));
+
+        const THEME_COLORS = [
+            { bg: '#e8eaf6', color: '#283593' }, { bg: '#e0f2f1', color: '#00695c' },
+            { bg: '#fff8e1', color: '#f57f17' }, { bg: '#f3e5f5', color: '#6a1b9a' },
+            { bg: '#e8f5e9', color: '#2e7d32' }, { bg: '#fbe9e7', color: '#bf360c' },
+            { bg: '#e1f5fe', color: '#01579b' }, { bg: '#f1f8e9', color: '#558b2f' },
+            { bg: '#fce4ec', color: '#880e4f' }, { bg: '#efebe9', color: '#4e342e' },
+            { bg: '#e0f7fa', color: '#006064' }, { bg: '#ede7f6', color: '#4527a0' },
+        ];
+
+        // ── State ──
+        let allDatasets = [];
+        let themes = [];
+        let portalState = {};
+        let selectedTheme = '';
+        let selectedPortal = '';
+        let searchQuery = '';
+        let themeColorMap = {};
+        let debounceTimer = null;
+        let csvCache = {};
+        let previewHoverTimer = null;
+        let bgDatasetDone = 0;
+        let bgDatasetTotal = 0;
+
+        // CSV prefetch state
+        let prefetchQueue = [];
+        let prefetching = false;
+        let prefetchTotal = 0;
+        let prefetchDone = 0;
+
+        // ── DOM ──
+        const $ = id => document.getElementById(id);
+        const $grid = $('grid'), $loading = $('loading'), $error = $('error');
+        const $noResults = $('no-results'), $count = $('dataset-count');
+        const $search = $('search-input'), $themeFilter = $('theme-filter');
+        const $portalFilter = $('portal-filter');
+        const $btnClear = $('btn-clear'), $filterInfo = $('filter-info');
+        const $statusBar = $('status-bar'), $statusText = $('status-text');
+        const $progressFill = $('progress-fill'), $statusBadge = $('status-badge');
+        const $previewStatus = $('preview-status'), $previewStatusText = $('preview-status-text');
+        const $previewProgressFill = $('preview-progress-fill'), $previewStatusBadge = $('preview-status-badge');
+        const $loadingText = $('loading-text');
+        const $tooltip = $('preview-tooltip');
+        const $catalogView = $('catalog-view');
+        const $detailView = $('detail-view');
+        const $detailTitle = $('detail-title');
+        const $detailBody = $('detail-body');
+
+        // ── Helpers ──
+        function normalize(s) { return s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase(); }
+        function stripHtml(h) { const t = document.createElement('div'); t.innerHTML = h; return t.textContent || ''; }
+        function formatDate(d) {
+            if (!d) return '';
+            try { const dt = new Date(d); return isNaN(dt.getTime()) ? '' : dt.toLocaleDateString('es-CO', { year: 'numeric', month: 'short', day: 'numeric' }); }
+            catch { return ''; }
+        }
+        function getThemeColor(name) {
+            if (!themeColorMap[name]) themeColorMap[name] = THEME_COLORS[Object.keys(themeColorMap).length % THEME_COLORS.length];
+            return themeColorMap[name];
+        }
+        function isValidUrl(url) {
+            if (!url) return false;
+            try { return !new URL(url).hostname.match(/^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.)/); }
+            catch { return false; }
+        }
+        function getFormatLabel(d) {
+            if (d.format) return d.format.toUpperCase();
+            if (d.mediaType) return ({ 'text/csv': 'CSV', 'application/json': 'JSON', 'application/xml': 'XML', 'application/zip': 'ZIP' })[d.mediaType] || d.mediaType.split('/').pop().toUpperCase();
+            return 'Descargar';
+        }
+        function esc(s) { const d = document.createElement('div'); d.textContent = String(s || ''); return d.innerHTML; }
+
+        // ── Data parsers ──
+        function parseDataset(raw, portalId) {
+            return {
+                title: raw.title || 'Sin título',
+                description: stripHtml(raw.description || ''),
+                modified: raw.modified || '',
+                publisher: raw.publisher?.name || '',
+                themeList: Array.isArray(raw.theme) ? raw.theme : [],
+                keyword: Array.isArray(raw.keyword) ? raw.keyword : [],
+                contactPoint: raw.contactPoint?.fn || '',
+                contactEmail: raw.contactPoint?.hasEmail ? raw.contactPoint.hasEmail.replace('mailto:', '') : '',
+                distributions: (Array.isArray(raw.distribution) ? raw.distribution : [])
+                    .map(d => ({ url: d.downloadURL || d.accessURL, label: getFormatLabel(d) }))
+                    .filter(d => isValidUrl(d.url)),
+                source: portalId || 'medata'
+            };
+        }
+
+        function parseSocrataDataset(raw, portalId) {
+            const res = raw.resource || {};
+            const cls = raw.classification || {};
+            const id = res.id;
+            if (!id) return null;
+            // Parse date (Socrata uses Unix timestamps in seconds)
+            let modified = '';
+            if (res.updatedAt) {
+                const ts = typeof res.updatedAt === 'number' ? res.updatedAt * 1000 : Date.parse(res.updatedAt);
+                if (!isNaN(ts)) modified = new Date(ts).toISOString();
+            }
+            const distributions = [];
+            if (isValidUrl(`https://www.datos.gov.co/resource/${id}.csv`)) {
+                distributions.push({ url: `https://www.datos.gov.co/resource/${id}.csv`, label: 'CSV' });
+            }
+            return {
+                title: res.name || 'Sin título',
+                description: res.description || '',
+                modified,
+                publisher: res.attribution || '',
+                themeList: cls.domain_category ? [cls.domain_category] : [],
+                keyword: [...(cls.domain_tags || []), ...(cls.tags || [])],
+                contactPoint: '',
+                contactEmail: res.contact_email || '',
+                distributions,
+                source: portalId
+            };
+        }
+
+        // ── CSV parsing ──
+        function parseCSV(text) {
+            const firstLine = text.split('\n')[0] || '';
+            const delim = (firstLine.match(/;/g) || []).length > (firstLine.match(/,/g) || []).length ? ';' : ',';
+            const lines = text.split('\n').map(l => l.trim()).filter(l => l);
+            if (lines.length < 2) return null;
+            const headers = lines[0].split(delim).map(h => h.replace(/^"|"$/g, '').trim());
+            const rows = [];
+            for (let i = 1; i < lines.length; i++) {
+                rows.push(lines[i].split(delim).map(c => c.replace(/^"|"$/g, '').trim()));
+            }
+            return { headers, rows };
+        }
+
+        function decodeCSVBuffer(buffer) {
+            const utf8 = new TextDecoder('utf-8').decode(buffer);
+            if (utf8.includes('\uFFFD')) return new TextDecoder('iso-8859-1').decode(buffer);
+            return utf8;
+        }
+
+        async function fetchCSVPreview(url) {
+            if (csvCache[url]) return csvCache[url];
+            const fetchUrl = url.replace(/^http:\/\//, 'https://');
+            const r = await fetch(CSV_PROXY(fetchUrl));
+            if (!r.ok) throw new Error('CSV fetch failed');
+            const reader = r.body.getReader();
+            const chunks = [];
+            let totalLen = 0;
+            while (totalLen < 8000) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                chunks.push(value);
+                totalLen += value.length;
+            }
+            reader.cancel();
+            const merged = new Uint8Array(totalLen);
+            let offset = 0;
+            for (const c of chunks) { merged.set(c, offset); offset += c.length; }
+            const text = decodeCSVBuffer(merged);
+            const parsed = parseCSV(text);
+            if (!parsed || parsed.rows.length === 0) throw new Error('Empty CSV');
+            csvCache[url] = parsed;
+            return parsed;
+        }
+
+        async function fetchFullCSV(url) {
+            if (csvCache[url]?.fullLoaded) return csvCache[url];
+            try {
+                const fetchUrl = url.replace(/^http:\/\//, 'https://');
+                const r = await fetch(CSV_PROXY(fetchUrl));
+                if (!r.ok) throw new Error('CSV fetch failed');
+                const buffer = await r.arrayBuffer();
+                const text = decodeCSVBuffer(buffer);
+                const parsed = parseCSV(text);
+                if (parsed) { parsed.fullLoaded = true; csvCache[url] = parsed; }
+                return parsed;
+            } catch (e) {
+                if (csvCache[url]) return csvCache[url];
+                throw e;
+            }
+        }
+
+        // ── Status bar ──
+        function showStatus(text, progress, badge) {
+            $statusBar.classList.add('visible');
+            $statusText.textContent = text;
+            if (progress === 'indeterminate') {
+                $progressFill.className = 'progress-fill indeterminate';
+            } else if (typeof progress === 'number') {
+                $progressFill.className = 'progress-fill';
+                $progressFill.style.width = Math.round(progress) + '%';
+            }
+            if (badge) {
+                $statusBadge.style.display = '';
+                $statusBadge.textContent = badge.text;
+                $statusBadge.className = 'badge' + (badge.stale ? ' stale' : '');
+            } else { $statusBadge.style.display = 'none'; }
+        }
+        function hideStatus() {
+            if ($previewStatus.style.display !== 'none') return;
+            $statusBar.classList.remove('visible');
+        }
+        function forceHideStatus() { $statusBar.classList.remove('visible'); }
+
+        function updateBgProgress() {
+            const pct = bgDatasetTotal > 0 ? (bgDatasetDone / bgDatasetTotal) * 100 : 50;
+            showStatus(`Indexando... ${bgDatasetDone}/${bgDatasetTotal || '?'}`, pct);
+        }
+
+        // ── Cache (per-portal) ──
+        function cacheKey(portalId) { return `medata_portal_${portalId}_v1`; }
+        function getPortalCache(portalId) {
+            try {
+                const raw = localStorage.getItem(cacheKey(portalId));
+                if (!raw) return null;
+                const c = JSON.parse(raw);
+                if (!c.datasets || !c.timestamp) return null;
+                return c;
+            } catch { return null; }
+        }
+        function setPortalCache(portalId, datasets, themes, total) {
+            try {
+                localStorage.setItem(cacheKey(portalId), JSON.stringify({ datasets, themes, total, timestamp: Date.now() }));
+            } catch {}
+        }
+        function isCacheStale(cache) { return Date.now() - cache.timestamp > CACHE_MAX_AGE; }
+        function formatCacheAge(ts) {
+            const m = Math.round((Date.now() - ts) / 60000);
+            if (m < 1) return 'ahora';
+            if (m < 60) return `hace ${m} min`;
+            return `hace ${Math.round(m / 60)}h`;
+        }
+
+        // ── Fetch with CORS proxy ──
+        async function fetchWithProxy(url, signal, timeout) {
+            const TO = timeout || 15000;
+            // Try direct fetch first (some APIs support CORS)
+            const methods = [
+                u => u,
+                ...CORS_PROXIES
+            ];
+            for (const pf of methods) {
+                const ctrl = new AbortController();
+                const timer = setTimeout(() => ctrl.abort(), TO);
+                try {
+                    if (signal) signal.addEventListener('abort', () => ctrl.abort(), { once: true });
+                    const r = await fetch(pf(url), { signal: ctrl.signal });
+                    clearTimeout(timer);
+                    if (r.ok) return await r.json();
+                } catch (e) {
+                    clearTimeout(timer);
+                    if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+                }
+            }
+            throw new Error(`All proxies failed for ${url}`);
+        }
+
+        // ── Portal fetchers ──
+        async function fetchDKANPage(portal, page, signal) {
+            const url = `${portal.base}/api/1/search?page=${page}&page-size=${PAGE_SIZE}`;
+            const data = await fetchWithProxy(url, signal);
+            const facets = data.facets || [];
+            return {
+                total: parseInt(data.total) || 0,
+                results: data.results ? Object.values(data.results).map(r => parseDataset(r, portal.id)) : [],
+                facets
+            };
+        }
+
+        async function fetchDCATPortal(portal, signal) {
+            const url = `${portal.base}/api/feed/dcat-us/1.1.json`;
+            const data = await fetchWithProxy(url, signal, 30000);
+            const items = data.dataset || [];
+            const results = items.map(r => parseDataset(r, portal.id));
+            return { total: results.length, results, facets: [] };
+        }
+
+        // ArcGIS Hub v3 datasets API
+        const ARCGIS_PAGE_SIZE = 100;
+
+        function parseArcgisV3Dataset(item, portalId) {
+            const a = item.attributes || {};
+            const id = a.id || item.id;
+            const hubBase = PORTAL_MAP[portalId]?.base || '';
+            // Build download URLs
+            const distributions = [];
+            if (a.url) {
+                // Feature service — construct CSV download
+                distributions.push({ url: `${hubBase}/datasets/${a.slug || id}/explore`, label: 'Ver' });
+            }
+            if (a.downloadable && id) {
+                distributions.push({ url: `${hubBase}/api/download/v1/items/${a.itemId || id}/csv?layers=0`, label: 'CSV' });
+            }
+            return {
+                title: a.name || a.snippet || 'Sin título',
+                description: stripHtml(a.description || a.searchDescription || a.snippet || ''),
+                modified: a.itemModified ? new Date(a.itemModified).toISOString() : '',
+                publisher: a.orgName || a.owner || '',
+                themeList: (a.categories || []).slice(0, 3),
+                keyword: a.tags || [],
+                contactPoint: '', contactEmail: '',
+                distributions,
+                source: portalId
+            };
+        }
+
+        async function fetchArcgisV3Page(portal, pageNum, signal) {
+            let url = `${portal.base}/api/v3/datasets?page[size]=${ARCGIS_PAGE_SIZE}&page[number]=${pageNum}`;
+            if (portal.orgFilter) url += `&filter[orgName]=${portal.orgFilter}`;
+            const data = await fetchWithProxy(url, signal, 20000);
+            const results = (data.data || []).map(item => parseArcgisV3Dataset(item, portal.id));
+            const total = data.meta?.stats?.totalCount || data.meta?.total || results.length;
+            return { total, results };
+        }
+
+        async function fetchSocrataPage(portal, offset, signal) {
+            const url = `${portal.base}/api/catalog/v1?q=medell%C3%ADn&limit=${SOCRATA_PAGE_SIZE}&offset=${offset}`;
+            const data = await fetchWithProxy(url, signal);
+            const results = (data.results || []).map(r => parseSocrataDataset(r, portal.id)).filter(Boolean);
+            return { total: data.resultSetSize || 0, results };
+        }
+
+        async function fetchFirstPage(portal) {
+            if (portal.type === 'dkan') {
+                const { total, results, facets } = await fetchDKANPage(portal, 1, null);
+                const themes = facets.filter(f => f.type === 'theme').sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+                return { results, total, themes };
+            } else if (portal.type === 'dcat') {
+                const { total, results } = await fetchDCATPortal(portal, null);
+                return { results, total, themes: [] };
+            } else if (portal.type === 'arcgis_v3') {
+                const { total, results } = await fetchArcgisV3Page(portal, 1, null);
+                return { results, total, themes: [] };
+            } else if (portal.type === 'socrata') {
+                const { results, total } = await fetchSocrataPage(portal, 0, null);
+                return { results, total, themes: [] };
+            }
+            return { results: [], total: 0, themes: [] };
+        }
+
+        // ── State management ──
+        function rebuildAllDatasets() {
+            allDatasets = [];
+            for (const p of PORTALS) {
+                if (portalState[p.id]?.datasets) allDatasets.push(...portalState[p.id].datasets);
+            }
+            // Rebuild merged theme list
+            const themeMap = new Map();
+            for (const ds of allDatasets) {
+                for (const t of ds.themeList) themeMap.set(t, (themeMap.get(t) || 0) + 1);
+            }
+            themes = [...themeMap.entries()].sort((a, b) => b[1] - a[1]).map(([name, total]) => ({ name, total }));
+            populateThemes(themes);
+            $count.textContent = allDatasets.length.toLocaleString('es-CO');
+        }
+
+        function populateThemes(themeData) {
+            const cur = $themeFilter.value;
+            while ($themeFilter.options.length > 1) $themeFilter.remove(1);
+            for (const t of themeData) {
+                const o = document.createElement('option');
+                o.value = t.name;
+                o.textContent = `${t.name}${t.total ? ` (${t.total})` : ''}`;
+                $themeFilter.appendChild(o);
+            }
+            if (cur) $themeFilter.value = cur;
+        }
+
+        function populatePortalFilter() {
+            while ($portalFilter.options.length > 1) $portalFilter.remove(1);
+            for (const p of PORTALS) {
+                const o = document.createElement('option');
+                o.value = p.id;
+                const count = portalState[p.id]?.datasets?.length || 0;
+                o.textContent = `${p.name}${count ? ` (${count})` : ''}`;
+                $portalFilter.appendChild(o);
+            }
+            if (selectedPortal) $portalFilter.value = selectedPortal;
+        }
+
+        // ── Filtered items (shared between render and detail lookup) ──
+        function getFilteredItems() {
+            const q = searchQuery ? normalize(searchQuery) : '';
+            let filtered = allDatasets;
+            if (q) filtered = filtered.filter(ds =>
+                normalize(ds.title + ' ' + ds.description + ' ' + ds.keyword.join(' ') + ' ' + ds.publisher).includes(q));
+            if (selectedTheme) filtered = filtered.filter(ds => ds.themeList.includes(selectedTheme));
+            if (selectedPortal) filtered = filtered.filter(ds => ds.source === selectedPortal);
+            return filtered;
+        }
+
+        // ── Render ──
+        function renderAllCards() {
+            if (searchQuery || selectedTheme || selectedPortal) { renderFilteredCards(); return; }
+            renderGrid(allDatasets);
+        }
+
+        function renderFilteredCards() {
+            const filtered = getFilteredItems();
+            renderGrid(filtered);
+            const total = filtered.length;
+            $filterInfo.textContent = `${total.toLocaleString('es-CO')} resultado${total !== 1 ? 's' : ''}` +
+                (searchQuery ? ` para "${searchQuery}"` : '') +
+                (selectedTheme ? ` · ${selectedTheme}` : '') +
+                (selectedPortal ? ` · ${PORTAL_MAP[selectedPortal]?.name || selectedPortal}` : '');
+            $btnClear.classList.add('visible');
+        }
+
+        function renderGrid(datasets) {
+            $noResults.style.display = datasets.length === 0 ? 'block' : 'none';
+            $grid.innerHTML = datasets.map((ds, i) => renderCard(ds, i)).join('');
+            prefetchVisibleCSVs();
+        }
+
+        function renderCard(ds, idx) {
+            const portal = PORTAL_MAP[ds.source];
+            const portalBadge = portal
+                ? `<span class="portal-badge" style="background:${portal.bg};color:${portal.color}">${esc(portal.name)}</span>`
+                : '';
+
+            const themeBadges = ds.themeList.map(t => {
+                const c = getThemeColor(t);
+                return `<span class="theme-badge" style="background:${c.bg};color:${c.color}">${esc(t)}</span>`;
+            }).join('');
+
+            const csvDists = ds.distributions.filter(d => d.label === 'CSV');
+            const otherDists = ds.distributions.filter(d => d.label !== 'CSV');
+
+            let distHtml = '';
+            if (csvDists.length > 0) {
+                distHtml += csvDists.map(d =>
+                    `<a class="dist-btn" href="${esc(d.url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${esc(d.label)}</a>`
+                ).join('');
+            }
+            distHtml += otherDists.map(d =>
+                `<a class="dist-btn" href="${esc(d.url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${esc(d.label)}</a>`
+            ).join('');
+
+            const meta = [ds.publisher, formatDate(ds.modified)].filter(Boolean).join(' · ');
+
+            let previewHtml = '';
+            if (csvDists.length > 0) {
+                const csvUrl = csvDists[0].url;
+                previewHtml = `<button class="preview-btn" data-csv="${esc(csvUrl)}" onclick="event.stopPropagation();openDetail(${idx})" onmouseenter="showPreview(event,'${csvUrl.replace(/'/g, "\\'")}')" onmouseleave="hidePreview()">Previsualizar</button>`;
+            }
+
+            return `<div class="card" data-ds-idx="${idx}" onclick="this.classList.toggle('open')">
+                <div class="card-title"><span class="arrow">&#9654;</span> ${esc(ds.title)}</div>
+                <div class="card-header-row">
+                    <div class="card-tags">${portalBadge}${themeBadges}</div>
+                    ${previewHtml}
+                </div>
+                <div class="card-details">
+                    ${ds.description ? `<div class="card-description">${esc(ds.description)}</div>` : ''}
+                    ${meta ? `<div class="card-meta">${esc(meta)}</div>` : ''}
+                    ${distHtml ? `<div class="distributions">${distHtml}</div>` : ''}
+                </div>
+            </div>`;
+        }
+
+        // ── CSV Prefetch ──
+        function queuePrefetch(urls) {
+            for (const url of urls) {
+                if (!csvCache[url] && !prefetchQueue.includes(url)) prefetchQueue.push(url);
+            }
+            prefetchTotal = prefetchDone + prefetchQueue.length;
+            if (!prefetching) runPrefetch();
+        }
+
+        function updatePreviewProgress() {
+            if (prefetchTotal === 0) return;
+            const pct = Math.round((prefetchDone / prefetchTotal) * 100);
+            $statusBar.classList.add('visible');
+            $previewStatus.style.display = 'flex';
+            $previewStatusText.textContent = `Previsualizaciones: ${prefetchDone}/${prefetchTotal}`;
+            $previewProgressFill.style.width = pct + '%';
+            if (prefetchDone >= prefetchTotal) {
+                $previewStatusBadge.style.display = '';
+                $previewStatusBadge.textContent = 'listo';
+                $previewStatusBadge.className = 'badge';
+                setTimeout(() => {
+                    $previewStatus.style.display = 'none';
+                    if (!$statusText.textContent) forceHideStatus();
+                }, 3000);
+            } else {
+                $previewStatusBadge.style.display = 'none';
+            }
+        }
+
+        async function runPrefetch() {
+            prefetching = true;
+            updatePreviewProgress();
+            while (prefetchQueue.length > 0) {
+                const url = prefetchQueue.shift();
+                if (csvCache[url]) { prefetchDone++; updatePreviewProgress(); continue; }
+                try {
+                    const data = await fetchCSVPreview(url);
+                    if (data?.rows.length > 0) data.sampleRows = pickRandomRows(data.rows, 3);
+                } catch {}
+                prefetchDone++;
+                updatePreviewProgress();
+            }
+            prefetching = false;
+        }
+
+        function pickRandomRows(rows, n) {
+            const count = Math.min(n, rows.length);
+            const available = [...Array(rows.length).keys()];
+            const picks = [];
+            for (let i = 0; i < count; i++) {
+                const idx = Math.floor(Math.random() * available.length);
+                picks.push(available.splice(idx, 1)[0]);
+            }
+            picks.sort((a, b) => a - b);
+            return picks.map(i => rows[i]);
+        }
+
+        function prefetchVisibleCSVs() {
+            const btns = $grid.querySelectorAll('.preview-btn[data-csv]');
+            const urls = [...btns].map(b => b.dataset.csv);
+            if (urls.length) queuePrefetch(urls);
+        }
+
+        // ── Preview tooltip ──
+        function showPreview(event, csvUrl) {
+            clearTimeout(previewHoverTimer);
+            const btn = event.target;
+            const rect = btn.getBoundingClientRect();
+            const vw = window.innerWidth, vh = window.innerHeight;
+
+            $tooltip.style.left = '-9999px'; $tooltip.style.top = '-9999px';
+            $tooltip.classList.add('visible');
+
+            if (csvCache[csvUrl]) {
+                renderTooltipContent(csvCache[csvUrl]);
+            } else {
+                $tooltip.innerHTML = `<h4><span class="mini-spinner"></span> Cargando vista previa...</h4>`;
+            }
+
+            const tw = Math.min($tooltip.offsetWidth, vw - 32);
+            const th = Math.min($tooltip.offsetHeight, vh - 32);
+            let left = rect.left + rect.width / 2 - tw / 2;
+            let top = rect.bottom + 10;
+            if (left + tw > vw - 16) left = vw - tw - 16;
+            if (left < 16) left = 16;
+            if (top + th > vh - 16) top = rect.top - th - 10;
+            if (top < 16) top = Math.max(16, (vh - th) / 2);
+            $tooltip.style.left = left + 'px';
+            $tooltip.style.top = top + 'px';
+
+            if (!csvCache[csvUrl]) {
+                previewHoverTimer = setTimeout(async () => {
+                    try {
+                        const data = await fetchCSVPreview(csvUrl);
+                        if (data?.rows.length > 0 && !data.sampleRows) data.sampleRows = pickRandomRows(data.rows, 3);
+                        if ($tooltip.classList.contains('visible')) { renderTooltipContent(data); repositionTooltip(rect); }
+                    } catch {
+                        if ($tooltip.classList.contains('visible'))
+                            $tooltip.innerHTML = `<div class="preview-error">No se pudo cargar la vista previa</div>`;
+                    }
+                }, 100);
+            }
+        }
+
+        function repositionTooltip(btnRect) {
+            const vw = window.innerWidth, vh = window.innerHeight;
+            const tw = Math.min($tooltip.offsetWidth, vw - 32);
+            const th = Math.min($tooltip.offsetHeight, vh - 32);
+            let left = btnRect.left + btnRect.width / 2 - tw / 2;
+            let top = btnRect.bottom + 10;
+            if (left + tw > vw - 16) left = vw - tw - 16;
+            if (left < 16) left = 16;
+            if (top + th > vh - 16) top = btnRect.top - th - 10;
+            if (top < 16) top = Math.max(16, (vh - th) / 2);
+            $tooltip.style.left = left + 'px';
+            $tooltip.style.top = top + 'px';
+        }
+
+        function renderTooltipContent(data) {
+            const { headers, rows, sampleRows } = data;
+            if (!rows?.length) { $tooltip.innerHTML = '<div class="preview-error">CSV sin datos</div>'; return; }
+            const samples = sampleRows || pickRandomRows(rows, 3);
+            const thRow = headers.map(h => `<th>${esc(h)}</th>`).join('');
+            const bodyRows = samples.map(row => {
+                const cells = headers.map((_, ci) => `<td title="${esc(row?.[ci] || '')}">${esc(row?.[ci] || '')}</td>`).join('');
+                return `<tr>${cells}</tr>`;
+            }).join('');
+            $tooltip.innerHTML = `
+                <h4>Vista previa (3 filas aleatorias)</h4>
+                <table><thead><tr>${thRow}</tr></thead><tbody>${bodyRows}</tbody></table>
+                <div class="preview-footer">${rows.length} filas &middot; ${headers.length} columnas &middot; Click para ver todo</div>`;
+        }
+
+        function hidePreview() {
+            clearTimeout(previewHoverTimer);
+            $tooltip.classList.remove('visible');
+        }
+
+        document.addEventListener('scroll', hidePreview, true);
+
+        // ── Detail page ──
+        function openDetail(cardIdx) {
+            hidePreview();
+            const displayItems = (searchQuery || selectedTheme || selectedPortal) ? getFilteredItems() : allDatasets;
+            const ds = displayItems[cardIdx];
+            if (!ds) return;
+
+            $catalogView.classList.add('hidden');
+            $detailView.classList.add('active');
+            $detailTitle.textContent = ds.title;
+
+            const portal = PORTAL_MAP[ds.source];
+            const portalBadge = portal ? `<span class="portal-badge" style="background:${portal.bg};color:${portal.color};font-size:0.75rem;padding:0.15rem 0.5rem;">${esc(portal.name)}</span>` : '';
+
+            const meta = [];
+            if (ds.publisher) meta.push(`<dt>Editor</dt><dd>${esc(ds.publisher)}</dd>`);
+            if (ds.modified) meta.push(`<dt>Actualizado</dt><dd>${formatDate(ds.modified)}</dd>`);
+            if (ds.contactPoint) meta.push(`<dt>Contacto</dt><dd>${esc(ds.contactPoint)}</dd>`);
+            if (ds.contactEmail) meta.push(`<dt>Email</dt><dd>${esc(ds.contactEmail)}</dd>`);
+            if (ds.keyword.length) meta.push(`<dt>Palabras clave</dt><dd>${ds.keyword.map(k => esc(k)).join(', ')}</dd>`);
+
+            const themeBadges = ds.themeList.map(t => {
+                const c = getThemeColor(t);
+                return `<span class="theme-badge" style="background:${c.bg};color:${c.color};font-size:0.75rem;padding:0.15rem 0.5rem;">${esc(t)}</span>`;
+            }).join(' ');
+
+            const distList = ds.distributions.map(d =>
+                `<li><a class="dist-btn" href="${esc(d.url)}" target="_blank" rel="noopener">${esc(d.label)}</a> <span style="font-size:0.8rem;color:#5f6368;word-break:break-all">${esc(d.url)}</span></li>`
+            ).join('');
+
+            const csvDist = ds.distributions.find(d => d.label === 'CSV');
+
+            $detailBody.innerHTML = `
+                <div class="detail-section">
+                    <h3>Información General</h3>
+                    <div style="margin-bottom:0.75rem;display:flex;gap:0.35rem;flex-wrap:wrap">${portalBadge}${themeBadges}</div>
+                    ${ds.description ? `<p style="margin-bottom:0.75rem">${esc(ds.description)}</p>` : ''}
+                    ${meta.length ? `<dl class="meta-grid">${meta.join('')}</dl>` : ''}
+                </div>
+                ${distList ? `<div class="detail-section"><h3>Distribuciones</h3><ul class="dist-list">${distList}</ul></div>` : ''}
+                ${csvDist ? `<div class="detail-section"><h3>Datos</h3><div id="detail-table-area"><div class="detail-loading"><div class="spinner"></div><p>Cargando datos del CSV...</p></div></div></div>` : ''}
+            `;
+
+            if (csvDist) loadDetailTable(csvDist.url);
+            window.scrollTo(0, 0);
+        }
+
+        async function loadDetailTable(csvUrl) {
+            const area = $('detail-table-area');
+            if (!area) return;
+            try {
+                const data = await fetchFullCSV(csvUrl);
+                if (!data) { area.innerHTML = '<p class="preview-error">No se pudieron cargar los datos</p>'; return; }
+                const { headers, rows } = data;
+                const thRow = headers.map(h => `<th>${esc(h)}</th>`).join('');
+                const maxRows = Math.min(rows.length, 100);
+                const bodyRows = rows.slice(0, maxRows).map(row => {
+                    const cells = headers.map((_, ci) => `<td title="${esc(row[ci] || '')}">${esc(row[ci] || '')}</td>`).join('');
+                    return `<tr>${cells}</tr>`;
+                }).join('');
+                area.innerHTML = `
+                    <p style="font-size:0.8rem;color:#5f6368;margin-bottom:0.5rem">${rows.length} filas &middot; ${headers.length} columnas${rows.length > 100 ? ' (mostrando primeras 100)' : ''}</p>
+                    <div class="detail-table-container" style="max-height:500px;overflow:auto;">
+                        <table class="detail-table"><thead><tr>${thRow}</tr></thead><tbody>${bodyRows}</tbody></table>
+                    </div>`;
+            } catch {
+                area.innerHTML = '<p class="preview-error">No se pudieron cargar los datos del CSV</p>';
+            }
+        }
+
+        function closeDetail() {
+            $detailView.classList.remove('active');
+            $catalogView.classList.remove('hidden');
+        }
+
+        window.addEventListener('popstate', () => {
+            if ($detailView.classList.contains('active')) closeDetail();
+        });
+
+        // ── Background indexing ──
+        async function bgIndexDKAN(portal) {
+            const total = portalState[portal.id].total;
+            if (!total) return;
+            const ctrl = new AbortController();
+            portalState[portal.id].bgCtrl = ctrl;
+            const totalPages = Math.ceil(total / PAGE_SIZE);
+            const all = [...(portalState[portal.id].datasets || [])];
+
+            for (let p = 2; p <= totalPages; p++) {
+                try {
+                    const { results } = await fetchDKANPage(portal, p, ctrl.signal);
+                    all.push(...results);
+                    bgDatasetDone += results.length;
+                    updateBgProgress();
+                } catch (e) {
+                    if (e.name === 'AbortError') return;
+                    break; // skip on error, save what we have
+                }
+            }
+            portalState[portal.id].datasets = all;
+            portalState[portal.id].allLoaded = true;
+            setPortalCache(portal.id, all, portalState[portal.id].themes, total);
+            rebuildAllDatasets();
+            renderAllCards();
+        }
+
+        async function bgIndexDCAT(portal) {
+            if (portalState[portal.id].allLoaded) return;
+            try {
+                const { results } = await fetchDCATPortal(portal, null);
+                portalState[portal.id].datasets = results;
+                portalState[portal.id].total = results.length;
+                portalState[portal.id].allLoaded = true;
+                bgDatasetDone += results.length;
+                bgDatasetTotal += results.length;
+                updateBgProgress();
+                setPortalCache(portal.id, results, [], results.length);
+                rebuildAllDatasets();
+                renderAllCards();
+            } catch (e) {
+                if (e.name !== 'AbortError') console.warn(`DCAT failed for ${portal.name}:`, e.message);
+            }
+        }
+
+        async function bgIndexArcgisV3(portal) {
+            if (portalState[portal.id].allLoaded) return;
+            const total = portalState[portal.id].total || 200;
+            const ctrl = new AbortController();
+            portalState[portal.id].bgCtrl = ctrl;
+            const totalPages = Math.ceil(total / ARCGIS_PAGE_SIZE);
+            const all = [...(portalState[portal.id].datasets || [])];
+            // Page 1 already fetched in first load
+            for (let p = 2; p <= totalPages; p++) {
+                try {
+                    const { results } = await fetchArcgisV3Page(portal, p, ctrl.signal);
+                    all.push(...results);
+                    bgDatasetDone += results.length;
+                    updateBgProgress();
+                    if (results.length < ARCGIS_PAGE_SIZE) break;
+                } catch (e) {
+                    if (e.name === 'AbortError') return;
+                    break;
+                }
+            }
+            portalState[portal.id].datasets = all;
+            portalState[portal.id].allLoaded = true;
+            setPortalCache(portal.id, all, [], total);
+            rebuildAllDatasets();
+            renderAllCards();
+        }
+
+        async function bgIndexSocrata(portal) {
+            const total = portalState[portal.id].total;
+            if (!total) return;
+            const ctrl = new AbortController();
+            portalState[portal.id].bgCtrl = ctrl;
+            const totalPages = Math.ceil(total / SOCRATA_PAGE_SIZE);
+            const all = [...(portalState[portal.id].datasets || [])];
+
+            for (let p = 1; p < totalPages; p++) {
+                try {
+                    const { results } = await fetchSocrataPage(portal, p * SOCRATA_PAGE_SIZE, ctrl.signal);
+                    all.push(...results);
+                    bgDatasetDone += results.length;
+                    updateBgProgress();
+                    if (results.length < SOCRATA_PAGE_SIZE) break;
+                } catch (e) {
+                    if (e.name === 'AbortError') return;
+                    break;
+                }
+            }
+            portalState[portal.id].datasets = all;
+            portalState[portal.id].allLoaded = true;
+            setPortalCache(portal.id, all, [], total);
+            rebuildAllDatasets();
+            renderAllCards();
+        }
+
+        async function bgIndexAll() {
+            const toIndex = PORTALS.filter(p => !portalState[p.id].allLoaded);
+            if (toIndex.length === 0) {
+                showStatus('Todos los portales indexados', 100, { text: 'listo' });
+                setTimeout(() => { $statusText.textContent = ''; hideStatus(); }, 2000);
+                return;
+            }
+
+            bgDatasetTotal = PORTALS.reduce((sum, p) => sum + (portalState[p.id].total || 50), 0);
+            bgDatasetDone = PORTALS.reduce((sum, p) => sum + (p.allLoaded ? (portalState[p.id].datasets.length || 0) : (portalState[p.id].datasets.length || 0)), 0);
+            updateBgProgress();
+
+            await Promise.allSettled(toIndex.map(p => {
+                if (p.type === 'dkan') return bgIndexDKAN(p);
+                if (p.type === 'dcat') return bgIndexDCAT(p);
+                if (p.type === 'arcgis_v3') return bgIndexArcgisV3(p);
+                if (p.type === 'socrata') return bgIndexSocrata(p);
+            }));
+
+            rebuildAllDatasets();
+            renderAllCards();
+            populatePortalFilter();
+            showStatus(`${allDatasets.length.toLocaleString('es-CO')} datasets indexados`, 100, { text: 'listo' });
+            setTimeout(() => { $statusText.textContent = ''; hideStatus(); }, 3000);
+        }
+
+        // ── Events ──
+        $search.addEventListener('input', () => {
+            clearTimeout(debounceTimer);
+            debounceTimer = setTimeout(() => {
+                searchQuery = $search.value.trim();
+                if (!searchQuery && !selectedTheme && !selectedPortal) {
+                    $filterInfo.textContent = '';
+                    $btnClear.classList.remove('visible');
+                    renderAllCards();
+                    return;
+                }
+                if (searchQuery && !allDatasets.length) {
+                    $filterInfo.textContent = 'Cargando índice de búsqueda...';
+                    $btnClear.classList.add('visible');
+                    return;
+                }
+                renderFilteredCards();
+            }, 250);
+        });
+
+        $themeFilter.addEventListener('change', () => {
+            selectedTheme = $themeFilter.value;
+            if (!selectedTheme && !searchQuery && !selectedPortal) {
+                $filterInfo.textContent = ''; $btnClear.classList.remove('visible');
+                renderAllCards();
+            } else { renderFilteredCards(); }
+        });
+
+        $portalFilter.addEventListener('change', () => {
+            selectedPortal = $portalFilter.value;
+            if (!selectedPortal && !searchQuery && !selectedTheme) {
+                $filterInfo.textContent = ''; $btnClear.classList.remove('visible');
+                renderAllCards();
+            } else { renderFilteredCards(); }
+        });
+
+        $btnClear.addEventListener('click', () => {
+            $search.value = ''; $themeFilter.value = ''; $portalFilter.value = '';
+            searchQuery = ''; selectedTheme = ''; selectedPortal = '';
+            $filterInfo.textContent = '';
+            $btnClear.classList.remove('visible');
+            renderAllCards();
+        });
+
+        // ── Init ──
+        (async () => {
+            // Initialize portal state
+            PORTALS.forEach(p => {
+                portalState[p.id] = { datasets: [], total: 0, themes: [], allLoaded: false, bgCtrl: null };
+            });
+
+            // Populate portal filter dropdowns
+            populatePortalFilter();
+
+            // Load all portal caches
+            let hasAnyCache = false;
+            const needsRefresh = [];
+
+            for (const portal of PORTALS) {
+                const cache = getPortalCache(portal.id);
+                if (cache?.datasets?.length > 0) {
+                    cache.datasets.forEach(ds => { if (!ds.source) ds.source = portal.id; });
+                    portalState[portal.id].datasets = cache.datasets;
+                    portalState[portal.id].themes = cache.themes || [];
+                    portalState[portal.id].total = cache.total || cache.datasets.length;
+                    portalState[portal.id].allLoaded = true;
+                    hasAnyCache = true;
+                    if (isCacheStale(cache)) needsRefresh.push(portal);
+                } else {
+                    needsRefresh.push(portal);
+                }
+            }
+
+            // Migrate old medata_v2 cache for returning users
+            if (portalState.medata.datasets.length === 0) {
+                try {
+                    const oldRaw = localStorage.getItem('medata_v2');
+                    if (oldRaw) {
+                        const old = JSON.parse(oldRaw);
+                        if (old?.datasets?.length > 0) {
+                            old.datasets.forEach(ds => { if (!ds.source) ds.source = 'medata'; });
+                            portalState.medata.datasets = old.datasets;
+                            portalState.medata.total = old.total || old.datasets.length;
+                            portalState.medata.themes = old.themes || [];
+                            portalState.medata.allLoaded = true;
+                            hasAnyCache = true;
+                            if (isCacheStale(old)) {
+                                if (!needsRefresh.find(p => p.id === 'medata')) needsRefresh.push(PORTAL_MAP.medata);
+                            } else {
+                                setPortalCache('medata', old.datasets, old.themes, old.total);
+                                const idx = needsRefresh.findIndex(p => p.id === 'medata');
+                                if (idx >= 0) needsRefresh.splice(idx, 1);
+                            }
+                        }
+                    }
+                } catch {}
+            }
+
+            if (hasAnyCache) {
+                // Render immediately from cache
+                rebuildAllDatasets();
+                renderAllCards();
+                populatePortalFilter();
+
+                if (needsRefresh.length > 0) {
+                    // Mark portals needing refresh as not loaded
+                    needsRefresh.forEach(p => { portalState[p.id].allLoaded = false; });
+                    showStatus(`Actualizando ${needsRefresh.length} portal${needsRefresh.length > 1 ? 'es' : ''}...`, 'indeterminate', { text: 'caché', stale: true });
+                    bgIndexAll();
+                } else {
+                    const newestTs = Math.max(...PORTALS.map(p => {
+                        const c = getPortalCache(p.id); return c?.timestamp || 0;
+                    }));
+                    showStatus('Datos actualizados', 100, { text: formatCacheAge(newestTs), stale: false });
+                    setTimeout(hideStatus, 2000);
+                }
+            } else {
+                // First visit — fetch page 1 from all portals in parallel
+                $loading.style.display = 'block';
+                $loadingText.textContent = 'Conectando con portales de datos...';
+
+                // Stagger portal fetches slightly to avoid proxy rate limits
+                const firstPageResults = await Promise.allSettled(
+                    PORTALS.map((p, i) => new Promise(resolve => setTimeout(() => resolve(fetchFirstPage(p)), i * 500)).then(r => r))
+                );
+
+                $loading.style.display = 'none';
+                let anySuccess = false;
+
+                for (let i = 0; i < PORTALS.length; i++) {
+                    const res = firstPageResults[i];
+                    if (res.status === 'fulfilled') {
+                        const { results, total, themes: pThemes } = res.value;
+                        portalState[PORTALS[i].id].datasets = results;
+                        portalState[PORTALS[i].id].total = total;
+                        if (pThemes?.length) portalState[PORTALS[i].id].themes = pThemes;
+                        if (PORTALS[i].type === 'dcat') {
+                            portalState[PORTALS[i].id].allLoaded = true;
+                            setPortalCache(PORTALS[i].id, results, [], total);
+                        }
+                        anySuccess = true;
+                    } else {
+                        console.warn(`First page failed for ${PORTALS[i].name}:`, res.reason?.message);
+                    }
+                }
+
+                if (!anySuccess) {
+                    $error.style.display = 'block';
+                    $error.innerHTML = '<p>No se pudieron cargar datos de ningún portal.</p><p style="margin-top:0.5rem"><a href="javascript:location.reload()">Reintentar</a></p>';
+                    return;
+                }
+
+                rebuildAllDatasets();
+                renderAllCards();
+                populatePortalFilter();
+                bgIndexAll();
+            }
+
+            // Periodic refresh
+            setInterval(() => {
+                const stale = PORTALS.filter(p => {
+                    const c = getPortalCache(p.id);
+                    return !c || isCacheStale(c);
+                });
+                if (stale.length > 0) {
+                    stale.forEach(p => { portalState[p.id].allLoaded = false; });
+                    bgIndexAll();
+                }
+            }, CACHE_MAX_AGE);
+        })();
+    </script>
+</body>
+</html>
