@@ -361,6 +361,7 @@
             url => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`
         ];
         const CSV_PROXIES = [
+            url => url,  // try direct fetch first (works if server allows CORS)
             url => `https://api.codetabs.com/v1/proxy?quest=${url}`,
             url => `https://corsproxy.io/?url=${encodeURIComponent(url)}`,
             url => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`
