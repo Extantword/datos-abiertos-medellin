@@ -77,6 +77,30 @@
         }
         .btn-clear:hover { background: #f5f7fa; }
         .btn-clear.visible { display: inline-block; }
+
+        /* Portal toggle buttons */
+        .portal-toggles {
+            display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center;
+            width: 100%; margin-top: 0.15rem;
+        }
+        .portal-toggles .label { font-size: 0.75rem; color: #80868b; margin-right: 0.25rem; }
+        .portal-toggle {
+            font-size: 0.7rem; padding: 0.2rem 0.6rem; border-radius: 12px;
+            border: 1.5px solid #e0e0e0; background: #fff; cursor: pointer;
+            font-weight: 600; transition: all 0.2s; opacity: 0.5;
+            display: flex; align-items: center; gap: 0.3rem;
+        }
+        .portal-toggle:hover { opacity: 0.8; }
+        .portal-toggle.active { opacity: 1; border-color: currentColor; }
+        .portal-toggle .toggle-count {
+            font-size: 0.6rem; font-weight: 400; opacity: 0.7;
+        }
+        .portal-toggle .toggle-spinner {
+            width: 10px; height: 10px; border: 1.5px solid #e0e0e0;
+            border-top-color: currentColor; border-radius: 50%;
+            animation: spin 0.6s linear infinite; display: none;
+        }
+        .portal-toggle.loading .toggle-spinner { display: inline-block; }
         .filter-info { width: 100%; font-size: 0.8rem; color: #5f6368; min-height: 1.2em; }
 
         .loading-container { text-align: center; padding: 3rem 1rem; }
@@ -289,10 +313,10 @@
             <select id="theme-filter">
                 <option value="">Todas las categor&iacute;as</option>
             </select>
-            <select id="portal-filter">
-                <option value="">Todos los portales</option>
-            </select>
             <button class="btn-clear" id="btn-clear">Limpiar filtros</button>
+            <div class="portal-toggles" id="portal-toggles">
+                <span class="label">Portales:</span>
+            </div>
             <div class="filter-info" id="filter-info"></div>
         </div>
 
@@ -363,8 +387,8 @@
         let allDatasets = [];
         let themes = [];
         let portalState = {};
+        let enabledPortals = new Set(['medata']); // Only Medata enabled by default
         let selectedTheme = '';
-        let selectedPortal = '';
         let searchQuery = '';
         let themeColorMap = {};
         let debounceTimer = null;
@@ -384,7 +408,7 @@
         const $grid = $('grid'), $loading = $('loading'), $error = $('error');
         const $noResults = $('no-results'), $count = $('dataset-count');
         const $search = $('search-input'), $themeFilter = $('theme-filter');
-        const $portalFilter = $('portal-filter');
+        const $portalToggles = $('portal-toggles');
         const $btnClear = $('btn-clear'), $filterInfo = $('filter-info');
         const $statusBar = $('status-bar'), $statusText = $('status-text');
         const $progressFill = $('progress-fill'), $statusBadge = $('status-badge');
@@ -688,7 +712,7 @@
         function rebuildAllDatasets() {
             allDatasets = [];
             for (const p of PORTALS) {
-                if (portalState[p.id]?.datasets) allDatasets.push(...portalState[p.id].datasets);
+                if (enabledPortals.has(p.id) && portalState[p.id]?.datasets) allDatasets.push(...portalState[p.id].datasets);
             }
             // Rebuild merged theme list
             const themeMap = new Map();
@@ -712,16 +736,102 @@
             if (cur) $themeFilter.value = cur;
         }
 
-        function populatePortalFilter() {
-            while ($portalFilter.options.length > 1) $portalFilter.remove(1);
+        function renderPortalToggles() {
+            $portalToggles.innerHTML = '<span class="label">Portales:</span>';
             for (const p of PORTALS) {
-                const o = document.createElement('option');
-                o.value = p.id;
+                const active = enabledPortals.has(p.id);
+                const loading = portalState[p.id]?.loading;
                 const count = portalState[p.id]?.datasets?.length || 0;
-                o.textContent = `${p.name}${count ? ` (${count})` : ''}`;
-                $portalFilter.appendChild(o);
+                const btn = document.createElement('button');
+                btn.className = 'portal-toggle' + (active ? ' active' : '') + (loading ? ' loading' : '');
+                btn.style.color = p.color;
+                btn.style.borderColor = active ? p.color : '#e0e0e0';
+                btn.style.background = active ? p.bg : '#fff';
+                btn.innerHTML = `<span class="toggle-spinner"></span>${esc(p.name)}${active && count ? `<span class="toggle-count">(${count})</span>` : ''}`;
+                btn.onclick = () => togglePortal(p.id);
+                $portalToggles.appendChild(btn);
             }
-            if (selectedPortal) $portalFilter.value = selectedPortal;
+        }
+
+        async function togglePortal(portalId) {
+            if (enabledPortals.has(portalId)) {
+                // Don't allow disabling the last portal
+                if (enabledPortals.size <= 1) return;
+                enabledPortals.delete(portalId);
+                saveEnabledPortals();
+                rebuildAllDatasets();
+                renderAllCards();
+                renderPortalToggles();
+                return;
+            }
+
+            // Enable portal
+            enabledPortals.add(portalId);
+            saveEnabledPortals();
+
+            const portal = PORTAL_MAP[portalId];
+            const ps = portalState[portalId];
+
+            // If already loaded from cache, just rebuild
+            if (ps.datasets.length > 0) {
+                rebuildAllDatasets();
+                renderAllCards();
+                renderPortalToggles();
+                if (!ps.allLoaded) bgIndexPortal(portal);
+                return;
+            }
+
+            // Need to fetch — show loading state
+            ps.loading = true;
+            renderPortalToggles();
+
+            try {
+                const { results, total, themes: pThemes } = await fetchFirstPage(portal);
+                ps.datasets = results;
+                ps.total = total;
+                if (pThemes?.length) ps.themes = pThemes;
+                if (portal.type === 'dcat') {
+                    ps.allLoaded = true;
+                    setPortalCache(portalId, results, [], total);
+                }
+            } catch (e) {
+                console.warn(`Failed to load ${portal.name}:`, e.message);
+            }
+
+            ps.loading = false;
+            rebuildAllDatasets();
+            renderAllCards();
+            renderPortalToggles();
+
+            // Background index remaining pages
+            if (!ps.allLoaded && ps.datasets.length > 0) bgIndexPortal(portal);
+        }
+
+        async function bgIndexPortal(portal) {
+            showStatus(`Indexando ${portal.name}...`, 'indeterminate');
+            try {
+                if (portal.type === 'dkan') await bgIndexDKAN(portal);
+                else if (portal.type === 'dcat') await bgIndexDCAT(portal);
+                else if (portal.type === 'arcgis_v3') await bgIndexArcgisV3(portal);
+                else if (portal.type === 'socrata') await bgIndexSocrata(portal);
+            } catch (e) {
+                console.warn(`Background index failed for ${portal.name}:`, e.message);
+            }
+            rebuildAllDatasets();
+            renderAllCards();
+            renderPortalToggles();
+            showStatus(`${allDatasets.length.toLocaleString('es-CO')} datasets indexados`, 100, { text: 'listo' });
+            setTimeout(hideStatus, 2000);
+        }
+
+        function saveEnabledPortals() {
+            try { localStorage.setItem('medata_enabled_portals', JSON.stringify([...enabledPortals])); } catch {}
+        }
+        function loadEnabledPortals() {
+            try {
+                const raw = localStorage.getItem('medata_enabled_portals');
+                if (raw) { const arr = JSON.parse(raw); if (arr.length > 0) enabledPortals = new Set(arr); }
+            } catch {}
         }
 
         // ── Filtered items (shared between render and detail lookup) ──
@@ -731,13 +841,12 @@
             if (q) filtered = filtered.filter(ds =>
                 normalize(ds.title + ' ' + ds.description + ' ' + ds.keyword.join(' ') + ' ' + ds.publisher).includes(q));
             if (selectedTheme) filtered = filtered.filter(ds => ds.themeList.includes(selectedTheme));
-            if (selectedPortal) filtered = filtered.filter(ds => ds.source === selectedPortal);
             return filtered;
         }
 
         // ── Render ──
         function renderAllCards() {
-            if (searchQuery || selectedTheme || selectedPortal) { renderFilteredCards(); return; }
+            if (searchQuery || selectedTheme) { renderFilteredCards(); return; }
             renderGrid(allDatasets);
         }
 
@@ -747,8 +856,7 @@
             const total = filtered.length;
             $filterInfo.textContent = `${total.toLocaleString('es-CO')} resultado${total !== 1 ? 's' : ''}` +
                 (searchQuery ? ` para "${searchQuery}"` : '') +
-                (selectedTheme ? ` · ${selectedTheme}` : '') +
-                (selectedPortal ? ` · ${PORTAL_MAP[selectedPortal]?.name || selectedPortal}` : '');
+                (selectedTheme ? ` · ${selectedTheme}` : '');
             $btnClear.classList.add('visible');
         }
 
@@ -947,7 +1055,7 @@
         // ── Detail page ──
         function openDetail(cardIdx) {
             hidePreview();
-            const displayItems = (searchQuery || selectedTheme || selectedPortal) ? getFilteredItems() : allDatasets;
+            const displayItems = (searchQuery || selectedTheme) ? getFilteredItems() : allDatasets;
             const ds = displayItems[cardIdx];
             if (!ds) return;
 
@@ -1122,38 +1230,14 @@
             renderAllCards();
         }
 
-        async function bgIndexAll() {
-            const toIndex = PORTALS.filter(p => !portalState[p.id].allLoaded);
-            if (toIndex.length === 0) {
-                showStatus('Todos los portales indexados', 100, { text: 'listo' });
-                setTimeout(() => { $statusText.textContent = ''; hideStatus(); }, 2000);
-                return;
-            }
-
-            bgDatasetTotal = PORTALS.reduce((sum, p) => sum + (portalState[p.id].total || 50), 0);
-            bgDatasetDone = PORTALS.reduce((sum, p) => sum + (p.allLoaded ? (portalState[p.id].datasets.length || 0) : (portalState[p.id].datasets.length || 0)), 0);
-            updateBgProgress();
-
-            await Promise.allSettled(toIndex.map(p => {
-                if (p.type === 'dkan') return bgIndexDKAN(p);
-                if (p.type === 'dcat') return bgIndexDCAT(p);
-                if (p.type === 'arcgis_v3') return bgIndexArcgisV3(p);
-                if (p.type === 'socrata') return bgIndexSocrata(p);
-            }));
-
-            rebuildAllDatasets();
-            renderAllCards();
-            populatePortalFilter();
-            showStatus(`${allDatasets.length.toLocaleString('es-CO')} datasets indexados`, 100, { text: 'listo' });
-            setTimeout(() => { $statusText.textContent = ''; hideStatus(); }, 3000);
-        }
+        // bgIndexAll removed — replaced by per-portal bgIndexPortal()
 
         // ── Events ──
         $search.addEventListener('input', () => {
             clearTimeout(debounceTimer);
             debounceTimer = setTimeout(() => {
                 searchQuery = $search.value.trim();
-                if (!searchQuery && !selectedTheme && !selectedPortal) {
+                if (!searchQuery && !selectedTheme) {
                     $filterInfo.textContent = '';
                     $btnClear.classList.remove('visible');
                     renderAllCards();
@@ -1170,23 +1254,15 @@
 
         $themeFilter.addEventListener('change', () => {
             selectedTheme = $themeFilter.value;
-            if (!selectedTheme && !searchQuery && !selectedPortal) {
-                $filterInfo.textContent = ''; $btnClear.classList.remove('visible');
-                renderAllCards();
-            } else { renderFilteredCards(); }
-        });
-
-        $portalFilter.addEventListener('change', () => {
-            selectedPortal = $portalFilter.value;
-            if (!selectedPortal && !searchQuery && !selectedTheme) {
+            if (!selectedTheme && !searchQuery) {
                 $filterInfo.textContent = ''; $btnClear.classList.remove('visible');
                 renderAllCards();
             } else { renderFilteredCards(); }
         });
 
         $btnClear.addEventListener('click', () => {
-            $search.value = ''; $themeFilter.value = ''; $portalFilter.value = '';
-            searchQuery = ''; selectedTheme = ''; selectedPortal = '';
+            $search.value = ''; $themeFilter.value = '';
+            searchQuery = ''; selectedTheme = '';
             $filterInfo.textContent = '';
             $btnClear.classList.remove('visible');
             renderAllCards();
@@ -1194,18 +1270,15 @@
 
         // ── Init ──
         (async () => {
+            // Load saved portal preferences
+            loadEnabledPortals();
+
             // Initialize portal state
             PORTALS.forEach(p => {
-                portalState[p.id] = { datasets: [], total: 0, themes: [], allLoaded: false, bgCtrl: null };
+                portalState[p.id] = { datasets: [], total: 0, themes: [], allLoaded: false, bgCtrl: null, loading: false };
             });
 
-            // Populate portal filter dropdowns
-            populatePortalFilter();
-
-            // Load all portal caches
-            let hasAnyCache = false;
-            const needsRefresh = [];
-
+            // Load all portal caches (even disabled ones, for instant toggle)
             for (const portal of PORTALS) {
                 const cache = getPortalCache(portal.id);
                 if (cache?.datasets?.length > 0) {
@@ -1214,10 +1287,6 @@
                     portalState[portal.id].themes = cache.themes || [];
                     portalState[portal.id].total = cache.total || cache.datasets.length;
                     portalState[portal.id].allLoaded = true;
-                    hasAnyCache = true;
-                    if (isCacheStale(cache)) needsRefresh.push(portal);
-                } else {
-                    needsRefresh.push(portal);
                 }
             }
 
@@ -1233,88 +1302,68 @@
                             portalState.medata.total = old.total || old.datasets.length;
                             portalState.medata.themes = old.themes || [];
                             portalState.medata.allLoaded = true;
-                            hasAnyCache = true;
-                            if (isCacheStale(old)) {
-                                if (!needsRefresh.find(p => p.id === 'medata')) needsRefresh.push(PORTAL_MAP.medata);
-                            } else {
-                                setPortalCache('medata', old.datasets, old.themes, old.total);
-                                const idx = needsRefresh.findIndex(p => p.id === 'medata');
-                                if (idx >= 0) needsRefresh.splice(idx, 1);
-                            }
+                            setPortalCache('medata', old.datasets, old.themes, old.total);
                         }
                     }
                 } catch {}
             }
 
-            if (hasAnyCache) {
-                // Render immediately from cache
+            // Render toggle buttons
+            renderPortalToggles();
+
+            // Check if Medata has cached data
+            if (portalState.medata.datasets.length > 0) {
                 rebuildAllDatasets();
                 renderAllCards();
-                populatePortalFilter();
 
-                if (needsRefresh.length > 0) {
-                    // Mark portals needing refresh as not loaded
-                    needsRefresh.forEach(p => { portalState[p.id].allLoaded = false; });
-                    showStatus(`Actualizando ${needsRefresh.length} portal${needsRefresh.length > 1 ? 'es' : ''}...`, 'indeterminate', { text: 'caché', stale: true });
-                    bgIndexAll();
+                // Refresh stale caches for enabled portals in background
+                const staleEnabled = PORTALS.filter(p =>
+                    enabledPortals.has(p.id) && (!portalState[p.id].allLoaded || isCacheStale(getPortalCache(p.id)))
+                );
+                if (staleEnabled.length > 0) {
+                    showStatus(`Actualizando ${staleEnabled.length} portal${staleEnabled.length > 1 ? 'es' : ''}...`, 'indeterminate', { text: 'caché', stale: true });
+                    for (const p of staleEnabled) {
+                        portalState[p.id].allLoaded = false;
+                        bgIndexPortal(p);
+                    }
                 } else {
-                    const newestTs = Math.max(...PORTALS.map(p => {
-                        const c = getPortalCache(p.id); return c?.timestamp || 0;
-                    }));
-                    showStatus('Datos actualizados', 100, { text: formatCacheAge(newestTs), stale: false });
-                    setTimeout(hideStatus, 2000);
+                    const c = getPortalCache('medata');
+                    if (c) { showStatus('Datos actualizados', 100, { text: formatCacheAge(c.timestamp), stale: false }); setTimeout(hideStatus, 2000); }
                 }
             } else {
-                // First visit — fetch page 1 from all portals in parallel
+                // First visit — fetch Medata first page
                 $loading.style.display = 'block';
-                $loadingText.textContent = 'Conectando con portales de datos...';
+                $loadingText.textContent = 'Conectando con Medata...';
 
-                // Stagger portal fetches slightly to avoid proxy rate limits
-                const firstPageResults = await Promise.allSettled(
-                    PORTALS.map((p, i) => new Promise(resolve => setTimeout(() => resolve(fetchFirstPage(p)), i * 500)).then(r => r))
-                );
+                try {
+                    const { results, total, themes: pThemes } = await fetchFirstPage(PORTAL_MAP.medata);
+                    portalState.medata.datasets = results;
+                    portalState.medata.total = total;
+                    if (pThemes?.length) portalState.medata.themes = pThemes;
+                    $loading.style.display = 'none';
 
-                $loading.style.display = 'none';
-                let anySuccess = false;
+                    rebuildAllDatasets();
+                    renderAllCards();
+                    renderPortalToggles();
 
-                for (let i = 0; i < PORTALS.length; i++) {
-                    const res = firstPageResults[i];
-                    if (res.status === 'fulfilled') {
-                        const { results, total, themes: pThemes } = res.value;
-                        portalState[PORTALS[i].id].datasets = results;
-                        portalState[PORTALS[i].id].total = total;
-                        if (pThemes?.length) portalState[PORTALS[i].id].themes = pThemes;
-                        if (PORTALS[i].type === 'dcat') {
-                            portalState[PORTALS[i].id].allLoaded = true;
-                            setPortalCache(PORTALS[i].id, results, [], total);
-                        }
-                        anySuccess = true;
-                    } else {
-                        console.warn(`First page failed for ${PORTALS[i].name}:`, res.reason?.message);
-                    }
-                }
-
-                if (!anySuccess) {
+                    // Background-index all of Medata
+                    bgIndexPortal(PORTAL_MAP.medata);
+                } catch (e) {
+                    $loading.style.display = 'none';
                     $error.style.display = 'block';
-                    $error.innerHTML = '<p>No se pudieron cargar datos de ningún portal.</p><p style="margin-top:0.5rem"><a href="javascript:location.reload()">Reintentar</a></p>';
-                    return;
+                    $error.innerHTML = '<p>No se pudieron cargar los datos de Medata.</p><p style="margin-top:0.5rem"><a href="javascript:location.reload()">Reintentar</a></p>';
                 }
-
-                rebuildAllDatasets();
-                renderAllCards();
-                populatePortalFilter();
-                bgIndexAll();
             }
 
-            // Periodic refresh
+            // Periodic refresh for enabled portals
             setInterval(() => {
                 const stale = PORTALS.filter(p => {
+                    if (!enabledPortals.has(p.id)) return false;
                     const c = getPortalCache(p.id);
                     return !c || isCacheStale(c);
                 });
                 if (stale.length > 0) {
-                    stale.forEach(p => { portalState[p.id].allLoaded = false; });
-                    bgIndexAll();
+                    stale.forEach(p => { portalState[p.id].allLoaded = false; bgIndexPortal(p); });
                 }
             }, CACHE_MAX_AGE);
         })();
