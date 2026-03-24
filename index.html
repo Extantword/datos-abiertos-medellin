@@ -895,7 +895,7 @@
             let previewHtml = '';
             if (csvDists.length > 0) {
                 const csvUrl = csvDists[0].url;
-                previewHtml = `<button class="preview-btn" data-csv="${esc(csvUrl)}" onclick="event.stopPropagation();openDetail(${idx})" onmouseenter="showPreview(event,'${csvUrl.replace(/'/g, "\\'")}')" onmouseleave="hidePreview()">Previsualizar</button>`;
+                previewHtml = `<button class="preview-btn" data-csv="${esc(csvUrl)}" onclick="event.stopPropagation();openDetail(${idx})" onmouseenter="showPreview(event,'${csvUrl.replace(/'/g, "\\'")}')" onmouseleave="hidePreview()">Ver datos</button>`;
             }
 
             return `<div class="card" data-ds-idx="${idx}" onclick="this.classList.toggle('open')">
