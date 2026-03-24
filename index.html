@@ -357,6 +357,7 @@
     <script>
         // ── Config ──
         const CORS_PROXIES = [
+            url => url,  // try direct fetch first (works if server allows CORS)
             url => `https://corsproxy.io/?url=${encodeURIComponent(url)}`,
             url => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`
         ];
