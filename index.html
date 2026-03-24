@@ -626,15 +626,16 @@
         function parseArcgisV3Dataset(item, portalId) {
             const a = item.attributes || {};
             const id = a.id || item.id;
+            const itemId = a.itemId || id;
             const hubBase = PORTAL_MAP[portalId]?.base || '';
-            // Build download URLs
             const distributions = [];
-            if (a.url) {
-                // Feature service — construct CSV download
-                distributions.push({ url: `${hubBase}/datasets/${a.slug || id}/explore`, label: 'Ver' });
+            // Always try CSV download for datasets with an item ID
+            if (itemId) {
+                distributions.push({ url: `${hubBase}/api/download/v1/items/${itemId}/csv?layers=0`, label: 'CSV' });
             }
-            if (a.downloadable && id) {
-                distributions.push({ url: `${hubBase}/api/download/v1/items/${a.itemId || id}/csv?layers=0`, label: 'CSV' });
+            // Add link to explore on portal
+            if (a.slug || id) {
+                distributions.push({ url: `${hubBase}/datasets/${a.slug || id}/explore`, label: 'Ver' });
             }
             return {
                 title: a.name || a.snippet || 'Sin título',
